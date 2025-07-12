@@ -11,12 +11,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { nigerianFoods, searchFoods, type NigerianFood } from "../data/nigerian-foods"
 import { calculateNutrition } from "../utils/calculations"
-import { Search, Plus, Trash2, Clock, CheckCircle, AlertCircle } from "lucide-react"
+import { Search, Plus, Trash2, Clock, CheckCircle, AlertCircle, Bluetooth, Scale, Wifi } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
 
 interface SelectedFood {
   food: NigerianFood
   grams: number
   nutrition: ReturnType<typeof calculateNutrition>
+}
+
+interface IoTScale {
+  id: string
+  name: string
+  type: "bluetooth" | "wifi"
+  batteryLevel?: number
+  isConnected: boolean
+  signal?: number
 }
 
 // Add this prop to the component
@@ -36,12 +46,65 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
 
+  // IoT Scale states - portions are default, grams when scale is enabled
+  const [useIoTScale, setUseIoTScale] = useState(false)
+  const [scaleWeight, setScaleWeight] = useState(0)
+  const [selectedScale, setSelectedScale] = useState<IoTScale | null>(null)
+  const [showScaleEditor, setShowScaleEditor] = useState(false)
+  const [showScaleSelection, setShowScaleSelection] = useState(false)
+  const [isScanning, setIsScanning] = useState(false)
+
+  // Mock available scales
+  const [availableScales] = useState<IoTScale[]>([
+    {
+      id: "scale-1",
+      name: "Kitchen Pro Scale",
+      type: "bluetooth",
+      batteryLevel: 85,
+      isConnected: false,
+      signal: 4,
+    },
+    {
+      id: "scale-2",
+      name: "Smart Scale X1",
+      type: "wifi",
+      isConnected: false,
+      signal: 3,
+    },
+    {
+      id: "scale-3",
+      name: "NutriScale 2000",
+      type: "bluetooth",
+      batteryLevel: 42,
+      isConnected: false,
+      signal: 5,
+    },
+    {
+      id: "scale-4",
+      name: "Digital Food Scale",
+      type: "bluetooth",
+      batteryLevel: 91,
+      isConnected: false,
+      signal: 2,
+    },
+  ])
+
   if (!user) return null
 
   const filteredFoods = searchTerm ? searchFoods(searchTerm) : nigerianFoods
 
   const addFood = (food: NigerianFood) => {
-    const grams = portionSizes[food.id] || 100
+    let grams: number
+
+    if (useIoTScale && selectedScale) {
+      // IoT scale mode uses direct gram input
+      grams = portionSizes[food.id] || 100
+    } else {
+      // Default portion mode - convert portions to grams
+      const portions = portionSizes[food.id] || 1
+      grams = food.servingWeight * portions
+    }
+
     const nutrition = calculateNutrition(
       food.calories,
       food.protein,
@@ -62,12 +125,52 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
       setSelectedFoods([...selectedFoods, { food, grams, nutrition }])
     }
 
-    // Reset portion size
-    setPortionSizes({ ...portionSizes, [food.id]: 100 })
+    // Reset input values
+    if (useIoTScale && selectedScale) {
+      setPortionSizes({ ...portionSizes, [food.id]: 100 })
+    } else {
+      setPortionSizes({ ...portionSizes, [food.id]: 1 })
+    }
   }
 
   const removeFood = (foodId: string) => {
     setSelectedFoods(selectedFoods.filter((sf) => sf.food.id !== foodId))
+  }
+
+  const connectToScale = (scale: IoTScale) => {
+    setSelectedScale({ ...scale, isConnected: true })
+    setScaleWeight(0)
+    setShowScaleSelection(false)
+    setMessage({ type: "success", text: `Connected to ${scale.name}!` })
+    setTimeout(() => setMessage(null), 3000)
+  }
+
+  const disconnectScale = () => {
+    setSelectedScale(null)
+    setScaleWeight(0)
+    setUseIoTScale(false)
+  }
+
+  const scanForScales = () => {
+    setIsScanning(true)
+    // Simulate scanning delay
+    setTimeout(() => {
+      setIsScanning(false)
+      setMessage({ type: "success", text: `Found ${availableScales.length} scales` })
+      setTimeout(() => setMessage(null), 2000)
+    }, 2000)
+  }
+
+  const simulateScaleReading = () => {
+    if (!selectedScale) return
+    // Simulate getting weight from IoT scale
+    const randomWeight = Math.floor(Math.random() * 500) + 50 // 50-550g
+    setScaleWeight(randomWeight)
+  }
+
+  const updateScaleWeight = (newWeight: number) => {
+    setScaleWeight(newWeight)
+    setShowScaleEditor(false)
   }
 
   const saveMeal = async () => {
@@ -136,7 +239,7 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Plus className="h-5 w-5 text-green-600" />
+            <Plus className="h-5 w-5 text-green-600 dark:text-green-400" />
             Log Your Meal
           </CardTitle>
           <CardDescription>Track your Nigerian meals and monitor your nutrition</CardDescription>
@@ -172,12 +275,90 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
             </div>
           </div>
 
+          {/* IoT Scale Controls */}
+          <div className="border-t pt-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="iot-scale">Use IoT Scale (Grams Mode)</Label>
+                <Switch
+                  id="iot-scale"
+                  checked={useIoTScale}
+                  onCheckedChange={(checked) => {
+                    setUseIoTScale(checked)
+                    if (checked) {
+                      setShowScaleSelection(true)
+                    } else {
+                      disconnectScale()
+                    }
+                  }}
+                />
+              </div>
+              {selectedScale?.isConnected && (
+                <div className="flex items-center gap-2">
+                  <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-xs text-green-600 dark:text-green-400">{selectedScale.name}</span>
+                </div>
+              )}
+            </div>
+
+            {useIoTScale && selectedScale?.isConnected && (
+              <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-medium text-sm">Current Scale Reading</h4>
+                    <p className="text-xs text-muted-foreground">Total weight on {selectedScale.name}</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-green-600 dark:text-green-400">{scaleWeight}g</div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowScaleEditor(true)}
+                      className="text-xs h-6 px-2"
+                    >
+                      Edit Weight
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={simulateScaleReading}
+                    className="flex-1 h-8 bg-transparent"
+                  >
+                    Read Scale
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setScaleWeight(0)} className="h-8 px-3">
+                    Reset
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setShowScaleSelection(true)} className="h-8 px-3">
+                    Change Scale
+                  </Button>
+                </div>
+
+                <div className="text-xs text-muted-foreground p-2 bg-blue-50 dark:bg-blue-950/50 rounded border-l-4 border-blue-400 dark:border-blue-600">
+                  <strong>Scale Mode:</strong> Enter food amounts in grams. The scale will help you measure precise
+                  weights.
+                </div>
+              </div>
+            )}
+
+            {!useIoTScale && (
+              <div className="text-xs text-muted-foreground p-2 bg-orange-50 dark:bg-orange-950/50 rounded border-l-4 border-orange-400 dark:border-orange-600">
+                <strong>Portion Mode:</strong> Enter food amounts in portions (e.g., 1.5 portions of rice). Perfect for
+                quick logging without a scale.
+              </div>
+            )}
+          </div>
+
           {message && (
             <div
-              className={`flex items-center gap-2 p-3 rounded-lg ${
+              className={`flex items-center gap-2 p-3 rounded-lg border ${
                 message.type === "success"
-                  ? "bg-green-50 text-green-700 border border-green-200"
-                  : "bg-red-50 text-red-700 border border-red-200"
+                  ? "bg-green-50 dark:bg-green-950/50 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800"
+                  : "bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
               }`}
             >
               {message.type === "success" ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
@@ -197,7 +378,10 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
           <CardContent>
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {filteredFoods.map((food) => (
-                <div key={food.id} className="flex items-center justify-between p-3 border rounded-lg">
+                <div
+                  key={food.id}
+                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                >
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
                       <h4 className="font-medium text-sm">{food.name}</h4>
@@ -212,25 +396,48 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
                   </div>
                   <div className="flex items-center gap-2 ml-4">
                     <div className="space-y-1">
-                      <Input
-                        type="number"
-                        min="10"
-                        step="10"
-                        value={portionSizes[food.id] || 100}
-                        onChange={(e) =>
-                          setPortionSizes({
-                            ...portionSizes,
-                            [food.id]: Number.parseInt(e.target.value) || 100,
-                          })
-                        }
-                        className="w-16 h-8 text-xs"
-                      />
-                      <p className="text-xs text-center text-muted-foreground">grams</p>
+                      {useIoTScale && selectedScale?.isConnected ? (
+                        <div className="text-center">
+                          <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Grams</div>
+                          <Input
+                            type="number"
+                            min="10"
+                            step="10"
+                            value={portionSizes[food.id] || 100}
+                            onChange={(e) =>
+                              setPortionSizes({
+                                ...portionSizes,
+                                [food.id]: Number.parseInt(e.target.value) || 100,
+                              })
+                            }
+                            className="w-16 h-8 text-xs"
+                          />
+                          <p className="text-xs text-center text-muted-foreground">grams</p>
+                        </div>
+                      ) : (
+                        <div className="text-center">
+                          <div className="text-xs font-medium text-green-600 dark:text-green-400">Portions</div>
+                          <Input
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            value={portionSizes[food.id] || 1}
+                            onChange={(e) =>
+                              setPortionSizes({
+                                ...portionSizes,
+                                [food.id]: Number.parseFloat(e.target.value) || 1,
+                              })
+                            }
+                            className="w-16 h-8 text-xs"
+                          />
+                          <p className="text-xs text-center text-muted-foreground">portions</p>
+                        </div>
+                      )}
                     </div>
                     <Button
                       size="sm"
                       onClick={() => addFood(food)}
-                      className="h-8 px-2 bg-green-600 hover:bg-green-700"
+                      className="h-8 px-2 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
                     >
                       <Plus className="h-3 w-3" />
                     </Button>
@@ -245,7 +452,7 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5 text-orange-600" />
+              <Clock className="h-5 w-5 text-orange-600 dark:text-orange-400" />
               {mealType.charAt(0).toUpperCase() + mealType.slice(1)} Items
             </CardTitle>
             <CardDescription>
@@ -262,11 +469,14 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
             ) : (
               <div className="space-y-3">
                 {selectedFoods.map((sf) => (
-                  <div key={sf.food.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                  <div key={sf.food.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border">
                     <div className="flex-1">
                       <h4 className="font-medium text-sm">{sf.food.name}</h4>
                       <p className="text-xs text-muted-foreground">
-                        {sf.grams}g = {sf.nutrition.calories.toFixed(0)} cal, {sf.nutrition.protein.toFixed(1)}g protein
+                        {useIoTScale && selectedScale?.isConnected
+                          ? `${sf.grams}g`
+                          : `${(sf.grams / sf.food.servingWeight).toFixed(1)} portions (${sf.grams}g)`}{" "}
+                        = {sf.nutrition.calories.toFixed(0)} cal, {sf.nutrition.protein.toFixed(1)}g protein
                       </p>
                       <div className="flex gap-4 text-xs text-muted-foreground mt-1">
                         <span>Carbs: {sf.nutrition.carbs.toFixed(1)}g</span>
@@ -278,7 +488,7 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
                       variant="ghost"
                       size="sm"
                       onClick={() => removeFood(sf.food.id)}
-                      className="h-8 px-2 text-red-600 hover:text-red-700"
+                      className="h-8 px-2 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
                     >
                       <Trash2 className="h-3 w-3" />
                     </Button>
@@ -312,7 +522,7 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
 
                 <Button
                   onClick={saveMeal}
-                  className="w-full mt-4 bg-green-600 hover:bg-green-700"
+                  className="w-full mt-4 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
                   disabled={selectedFoods.length === 0 || isLoading}
                 >
                   {isLoading ? "Logging..." : `Log ${mealType.charAt(0).toUpperCase() + mealType.slice(1)}`}
@@ -322,6 +532,129 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Scale Selection Dialog */}
+      {showScaleSelection && (
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-background border rounded-lg shadow-lg max-w-md w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-medium flex items-center gap-2">
+                  <Scale className="h-5 w-5" />
+                  Select IoT Scale
+                </h3>
+                <Button variant="ghost" size="sm" onClick={() => setShowScaleSelection(false)} className="h-8 w-8 p-0">
+                  ×
+                </Button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={scanForScales}
+                    disabled={isScanning}
+                    className="flex-1 h-9 bg-transparent"
+                  >
+                    {isScanning ? "Scanning..." : "Scan for Scales"}
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Available Scales</Label>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {availableScales.map((scale) => (
+                      <div
+                        key={scale.id}
+                        className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+                        onClick={() => connectToScale(scale)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1">
+                            {scale.type === "bluetooth" ? (
+                              <Bluetooth className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                            ) : (
+                              <Wifi className="h-4 w-4 text-green-600 dark:text-green-400" />
+                            )}
+                          </div>
+                          <div>
+                            <h4 className="font-medium text-sm">{scale.name}</h4>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <span className="capitalize">{scale.type}</span>
+                              {scale.batteryLevel && <span>• Battery: {scale.batteryLevel}%</span>}
+                              <span>
+                                • Signal: {"●".repeat(scale.signal || 0)}
+                                {"○".repeat(5 - (scale.signal || 0))}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          className="h-7 px-3 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
+                        >
+                          Connect
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="text-xs text-muted-foreground p-2 bg-blue-50 dark:bg-blue-950/50 rounded border-l-4 border-blue-400 dark:border-blue-600">
+                  <strong>Note:</strong> Make sure your scale is powered on and in pairing mode. Bluetooth scales need
+                  to be within range.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scale Weight Editor Dialog */}
+      {showScaleEditor && (
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-background border rounded-lg shadow-lg max-w-sm w-full mx-4">
+            <div className="p-6">
+              <h3 className="font-medium mb-4">Edit Scale Weight</h3>
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="scale-weight">Weight (grams)</Label>
+                  <Input
+                    id="scale-weight"
+                    type="number"
+                    min="0"
+                    step="1"
+                    defaultValue={scaleWeight}
+                    className="mt-1"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const target = e.target as HTMLInputElement
+                        updateScaleWeight(Number.parseInt(target.value) || 0)
+                      }
+                    }}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => setShowScaleEditor(false)} className="flex-1">
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={(e) => {
+                      const input = (e.target as HTMLElement)
+                        .closest(".bg-background")
+                        ?.querySelector("input") as HTMLInputElement
+                      updateScaleWeight(Number.parseInt(input?.value) || 0)
+                    }}
+                    className="flex-1 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
+                  >
+                    Update
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
