@@ -11,12 +11,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { nigerianFoods, searchFoods, type NigerianFood } from "../data/nigerian-foods"
 import { calculateNutrition } from "../utils/calculations"
-import { Search, Plus, Trash2, Clock, CheckCircle, AlertCircle, Bluetooth, Scale, Wifi } from "lucide-react"
+import { Search, Plus, Trash2, Clock, CheckCircle, AlertCircle, Bluetooth, Scale, Wifi, Minus } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 
 interface SelectedFood {
   food: NigerianFood
   grams: number
+  portions: number
   nutrition: ReturnType<typeof calculateNutrition>
 }
 
@@ -42,7 +43,7 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
   const [mealType, setMealType] = useState<"breakfast" | "lunch" | "dinner" | "snack">("breakfast")
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedFoods, setSelectedFoods] = useState<SelectedFood[]>([])
-  const [portionSizes, setPortionSizes] = useState<{ [key: string]: number }>({})
+  const [gramAmounts, setGramAmounts] = useState<{ [key: string]: number }>({})
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
 
@@ -93,15 +94,18 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
 
   const filteredFoods = searchTerm ? searchFoods(searchTerm) : nigerianFoods
 
-  const addFood = (food: NigerianFood) => {
+  const addFoodPortion = (food: NigerianFood) => {
     let grams: number
+    let portions: number
 
     if (useIoTScale && selectedScale) {
       // IoT scale mode uses direct gram input
-      grams = portionSizes[food.id] || 100
+      grams = gramAmounts[food.id] || 100
+      portions = grams / food.servingWeight
     } else {
-      // Default portion mode - convert portions to grams
-      const portions = portionSizes[food.id] || 1
+      // Default portion mode - add 1 portions each time
+      const existingFood = selectedFoods.find((sf) => sf.food.id === food.id)
+      portions = existingFood ? existingFood.portions + 1 : 1
       grams = food.servingWeight * portions
     }
 
@@ -119,17 +123,44 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
     const existingIndex = selectedFoods.findIndex((sf) => sf.food.id === food.id)
     if (existingIndex >= 0) {
       const updated = [...selectedFoods]
-      updated[existingIndex] = { food, grams, nutrition }
+      updated[existingIndex] = { food, grams, portions, nutrition }
       setSelectedFoods(updated)
     } else {
-      setSelectedFoods([...selectedFoods, { food, grams, nutrition }])
+      setSelectedFoods([...selectedFoods, { food, grams, portions, nutrition }])
     }
+  }
 
-    // Reset input values
-    if (useIoTScale && selectedScale) {
-      setPortionSizes({ ...portionSizes, [food.id]: 100 })
+  const removeFoodPortion = (foodId: string) => {
+    const existingFood = selectedFoods.find((sf) => sf.food.id === foodId)
+    if (!existingFood) return
+
+    if (existingFood.portions <= 1) {
+      // Remove the food entirely if it's the last portion
+      setSelectedFoods(selectedFoods.filter((sf) => sf.food.id !== foodId))
     } else {
-      setPortionSizes({ ...portionSizes, [food.id]: 1 })
+      // Reduce by 1 portions
+      const newPortions = existingFood.portions - 1
+      const newGrams = existingFood.food.servingWeight * newPortions
+      const newNutrition = calculateNutrition(
+        existingFood.food.calories,
+        existingFood.food.protein,
+        existingFood.food.carbs,
+        existingFood.food.fats,
+        existingFood.food.fiber,
+        existingFood.food.iron,
+        existingFood.food.vitaminA,
+        newGrams,
+      )
+
+      const updated = [...selectedFoods]
+      const index = updated.findIndex((sf) => sf.food.id === foodId)
+      updated[index] = {
+        food: existingFood.food,
+        grams: newGrams,
+        portions: newPortions,
+        nutrition: newNutrition,
+      }
+      setSelectedFoods(updated)
     }
   }
 
@@ -205,6 +236,7 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
     if (result.success) {
       setSelectedFoods([])
       setSearchTerm("")
+      setGramAmounts({})
       setMessage({ type: "success", text: "Meal logged successfully!" })
 
       // Call the callback to refresh dashboard
@@ -347,8 +379,8 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
 
             {!useIoTScale && (
               <div className="text-xs text-muted-foreground p-2 bg-orange-50 dark:bg-orange-950/50 rounded border-l-4 border-orange-400 dark:border-orange-600">
-                <strong>Portion Mode:</strong> Enter food amounts in portions (e.g., 1.5 portions of rice). Perfect for
-                quick logging without a scale.
+                <strong>Portion Mode:</strong> Click the + button to add 1 portion at a time. Perfect for quick logging
+                without a scale.
               </div>
             )}
           </div>
@@ -377,73 +409,81 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
           </CardHeader>
           <CardContent>
             <div className="space-y-3 max-h-96 overflow-y-auto">
-              {filteredFoods.map((food) => (
-                <div
-                  key={food.id}
-                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h4 className="font-medium text-sm">{food.name}</h4>
-                      <Badge variant="outline" className="text-xs">
-                        {food.category}
-                      </Badge>
+              {filteredFoods.map((food) => {
+                const selectedFood = selectedFoods.find((sf) => sf.food.id === food.id)
+                return (
+                  <div
+                    key={food.id}
+                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-medium text-sm">{food.name}</h4>
+                        <Badge variant="outline" className="text-xs">
+                          {food.category}
+                        </Badge>
+                        {selectedFood && (
+                          <Badge
+                            variant="secondary"
+                            className="text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300"
+                          >
+                            {useIoTScale && selectedScale?.isConnected
+                              ? `${selectedFood.grams}g added`
+                              : `${selectedFood.portions} portions added`}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        {food.calories} cal, {food.protein}g protein per 100g
+                      </p>
+                      <p className="text-xs text-muted-foreground">{food.description}</p>
                     </div>
-                    <p className="text-xs text-muted-foreground mb-2">
-                      {food.calories} cal, {food.protein}g protein per 100g
-                    </p>
-                    <p className="text-xs text-muted-foreground">{food.description}</p>
-                  </div>
-                  <div className="flex items-center gap-2 ml-4">
-                    <div className="space-y-1">
+                    <div className="flex items-center gap-2 ml-4">
                       {useIoTScale && selectedScale?.isConnected ? (
-                        <div className="text-center">
-                          <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Grams</div>
-                          <Input
-                            type="number"
-                            min="10"
-                            step="10"
-                            value={portionSizes[food.id] || 100}
-                            onChange={(e) =>
-                              setPortionSizes({
-                                ...portionSizes,
-                                [food.id]: Number.parseInt(e.target.value) || 100,
-                              })
-                            }
-                            className="w-16 h-8 text-xs"
-                          />
-                          <p className="text-xs text-center text-muted-foreground">grams</p>
+                        <div className="flex items-center gap-2">
+                          <div className="text-center">
+                            <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Grams</div>
+                            <Input
+                              type="number"
+                              min="10"
+                              step="10"
+                              value={gramAmounts[food.id] || 100}
+                              onChange={(e) =>
+                                setGramAmounts({
+                                  ...gramAmounts,
+                                  [food.id]: Number.parseInt(e.target.value) || 100,
+                                })
+                              }
+                              className="w-16 h-8 text-xs"
+                            />
+                          </div>
+                          <Button
+                            size="sm"
+                            onClick={() => addFoodPortion(food)}
+                            className="h-8 px-2 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
                         </div>
                       ) : (
-                        <div className="text-center">
-                          <div className="text-xs font-medium text-green-600 dark:text-green-400">Portions</div>
-                          <Input
-                            type="number"
-                            min="0.1"
-                            step="0.1"
-                            value={portionSizes[food.id] || 1}
-                            onChange={(e) =>
-                              setPortionSizes({
-                                ...portionSizes,
-                                [food.id]: Number.parseFloat(e.target.value) || 1,
-                              })
-                            }
-                            className="w-16 h-8 text-xs"
-                          />
-                          <p className="text-xs text-center text-muted-foreground">portions</p>
+                        <div className="flex items-center gap-1">
+                          <div className="text-center">
+                            <div className="text-xs font-medium text-green-600 dark:text-green-400">+1 portion</div>
+                            <div className="text-xs text-muted-foreground">per click</div>
+                          </div>
+                          <Button
+                            size="sm"
+                            onClick={() => addFoodPortion(food)}
+                            className="h-8 px-2 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
                         </div>
                       )}
                     </div>
-                    <Button
-                      size="sm"
-                      onClick={() => addFood(food)}
-                      className="h-8 px-2 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
-                    >
-                      <Plus className="h-3 w-3" />
-                    </Button>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </CardContent>
         </Card>
@@ -475,7 +515,7 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
                       <p className="text-xs text-muted-foreground">
                         {useIoTScale && selectedScale?.isConnected
                           ? `${sf.grams}g`
-                          : `${(sf.grams / sf.food.servingWeight).toFixed(1)} portions (${sf.grams}g)`}{" "}
+                          : `${sf.portions} portions (${sf.grams}g)`}{" "}
                         = {sf.nutrition.calories.toFixed(0)} cal, {sf.nutrition.protein.toFixed(1)}g protein
                       </p>
                       <div className="flex gap-4 text-xs text-muted-foreground mt-1">
@@ -484,14 +524,28 @@ export default function MealLogger({ onMealLogged }: MealLoggerProps = {}) {
                         <span>Fiber: {sf.nutrition.fiber.toFixed(1)}g</span>
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeFood(sf.food.id)}
-                      className="h-8 px-2 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      {!useIoTScale && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFoodPortion(sf.food.id)}
+                          className="h-8 px-2 text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
+                          title="Remove 1 portion"
+                        >
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeFood(sf.food.id)}
+                        className="h-8 px-2 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                        title="Remove completely"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
 
