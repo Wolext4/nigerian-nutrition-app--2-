@@ -522,9 +522,19 @@ function ProfileSettingsForm() {
               </div>
             </div>
 
+            <div className="mt-4">
+              <Button
+                onClick={() => window.open("https://github.com/Wolext4/nigerian-nutrition-app--2-/releases", "_blank")}
+                className="w-full h-12 bg-blue-600 hover:bg-blue-700"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download Latest App Version
+              </Button>
+            </div>
+
             <div className="text-sm text-muted-foreground p-3 bg-muted/50 rounded-lg">
               Export includes your profile information and meal logs. This data can be imported into other devices or
-              used as a backup.
+              used as a backup. Download the latest app version to get new features and improvements.
             </div>
           </div>
         </CardContent>
